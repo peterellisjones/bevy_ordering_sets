@@ -12,10 +12,14 @@ schedule)` pair: every system in `Writes::<T>` runs before every system in
 - `register_data_flow::<T>(app, schedule)` wires `Writes::<T>` before
   `Reads::<T>` in that schedule.
 
-`T` is just a marker for the data flowing from producers to consumers — usually
-the message/resource/component type itself. It is never constructed, so
-`Writes<T>` / `Reads<T>` impose no trait bounds on `T` beyond `Send + Sync +
-'static`.
+`T` names the data flowing from producers to consumers — **use the actual
+resource / component / message type itself** (`Writes::<Orders>`,
+`Reads::<SensorDetections>`). It is never constructed, so `Writes<T>` /
+`Reads<T>` impose no trait bounds on `T` beyond `Send + Sync + 'static`. Reusing
+the real type keeps the ordering self-documenting and makes it impossible for a
+producer and consumer to name two different markers for the same data. A
+dedicated marker struct is only worth it when the flow isn't a single Rust type
+(e.g. a logical phase spanning several types).
 
 ## Quick start
 
@@ -23,11 +27,9 @@ the message/resource/component type itself. It is never constructed, so
 use bevy::prelude::*;
 use bevy_ordering_sets::{Reads, Writes, register_data_flow};
 
+// The data that flows from producer to consumer. It is its own marker.
 #[derive(Resource, Default)]
 struct Targets(Vec<u32>);
-
-// A marker naming the data that flows from producer to consumer.
-struct Targeting;
 
 fn produce(mut targets: ResMut<Targets>) {
     targets.0.push(42);
@@ -42,12 +44,12 @@ fn main() {
     let mut app = App::new();
     app.init_resource::<Targets>();
 
-    // Order Writes::<Targeting> before Reads::<Targeting> in `Update`.
-    register_data_flow::<Targeting>(&mut app, Update);
+    // Order Writes::<Targets> before Reads::<Targets> in `Update`.
+    register_data_flow::<Targets>(&mut app, Update);
 
     app.add_systems(Update, (
-        produce.in_set(Writes::<Targeting>::set()),
-        consume.in_set(Reads::<Targeting>::set()),
+        produce.in_set(Writes::<Targets>::set()),
+        consume.in_set(Reads::<Targets>::set()),
     ));
 
     app.update();
