@@ -12,12 +12,8 @@
 //!
 //! `T` names the data that flows from producers to consumers — **use the actual
 //! resource / component / message type itself** (`Writes::<Orders>`,
-//! `Reads::<SensorDetections>`). `T` is never constructed, so `Writes<T>` /
+//! `Reads::<SensorDetections>`). It is never constructed, so `Writes<T>` /
 //! `Reads<T>` impose no trait bounds on `T` beyond `Send + Sync + 'static`.
-//! Reusing the real type keeps the ordering self-documenting and makes it
-//! impossible for a producer and consumer to name two different markers for the
-//! same data. A dedicated marker struct is only worth it when the flow isn't a
-//! single Rust type (e.g. a logical phase spanning several types).
 //!
 //! # Quick start
 //!
