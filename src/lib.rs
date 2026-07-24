@@ -68,11 +68,24 @@
 //! acceptable, prefer leaving the systems unordered (and, if they conflict,
 //! declaring the pair `ambiguous_with` each other) instead of forcing an order.
 //!
+//! # Registry (feature `registry`, off by default)
+//!
+//! With the **`registry`** cargo feature enabled, every `register_data_flow`
+//! call is recorded in a `DataFlowRegistry` resource, so schedule-introspection
+//! tooling can enumerate the declared flows — each entry names the flowing type,
+//! its `Writes<T>` / `Reads<T>` set identities, and the schedule — and check
+//! that every system participating in a flow's data actually joined the right
+//! set. The feature is **off by default**: without it, `register_data_flow` only
+//! wires the ordering edge (the crate's original behaviour) and adds no
+//! per-registration bookkeeping. Enable it in the consumer that needs the audit
+//! (`bevy_ordering_sets = { version = "0.3", features = ["registry"] }`).
+//!
 //! # Bevy compatibility
 //!
 //! | `bevy_ordering_sets` | Bevy |
 //! |----------------------|------|
 //! | 0.1                  | 0.18 |
+//! | 0.2, 0.3             | 0.19 |
 
 use std::{
     fmt,
@@ -80,6 +93,11 @@ use std::{
     marker::PhantomData,
 };
 
+#[cfg(feature = "registry")]
+use std::any::{TypeId, type_name};
+
+#[cfg(feature = "registry")]
+use bevy::ecs::schedule::{InternedScheduleLabel, InternedSystemSet};
 use bevy::{ecs::schedule::ScheduleLabel, prelude::*};
 
 /// System set for systems that **write** data of type `T`.
@@ -184,11 +202,80 @@ impl<T: Send + Sync + 'static> Reads<T> {
 ///
 /// Call once per `(T, schedule)` pair in the plugin that owns the data flow.
 ///
+/// With the `registry` feature enabled, also records the registration in the
+/// app's `DataFlowRegistry` (creating it on first use), so tooling can enumerate
+/// every declared flow. Without the feature (the default) this only wires the
+/// ordering edge — the recording is the sole thing the feature adds; the
+/// `Writes<T>` → `Reads<T>` ordering is identical either way.
+///
 /// See the [crate-level gotcha](crate#gotcha-only-register-flows-you-actually-need-same-frame):
 /// this adds empty sets that participate in toposort, so only register flows
 /// whose consumer genuinely needs the producer's output the same frame.
 pub fn register_data_flow<T: Send + Sync + 'static>(app: &mut App, schedule: impl ScheduleLabel) {
+    #[cfg(feature = "registry")]
+    let schedule = schedule.intern();
     app.configure_sets(schedule, Writes::<T>::set().before(Reads::<T>::set()));
+    #[cfg(feature = "registry")]
+    app.world_mut()
+        .get_resource_or_init::<DataFlowRegistry>()
+        .registrations
+        .push(DataFlowRegistration {
+            data_type_name: type_name::<T>(),
+            data_type_id: TypeId::of::<T>(),
+            writes: Writes::<T>::set().intern(),
+            reads: Reads::<T>::set().intern(),
+            schedule,
+        });
+}
+
+/// Enumerable registry of every [`register_data_flow`] registration in an
+/// [`App`].
+///
+/// One [`DataFlowRegistration`] is recorded per `register_data_flow::<T>` call.
+/// The resource is created on the first registration and is otherwise inert —
+/// it holds no schedule state, only a description of the declared flows for
+/// introspection tooling (e.g. an audit that every writer of `T` joined
+/// `Writes<T>` and every reader joined `Reads<T>`).
+///
+/// Present only with the `registry` feature enabled.
+#[cfg(feature = "registry")]
+#[derive(Resource, Default)]
+pub struct DataFlowRegistry {
+    registrations: Vec<DataFlowRegistration>,
+}
+
+#[cfg(feature = "registry")]
+impl DataFlowRegistry {
+    /// Iterates every recorded registration, in the order they were registered.
+    pub fn iter(&self) -> impl Iterator<Item = &DataFlowRegistration> {
+        self.registrations.iter()
+    }
+}
+
+/// A single [`register_data_flow`] registration: the flowing data type together
+/// with the set identities and schedule the flow was wired into.
+///
+/// The `writes` / `reads` [`InternedSystemSet`]s are the exact `Writes<T>` /
+/// `Reads<T>` set instances participating systems join, so tooling can look up
+/// each set's members in a built schedule (e.g. via
+/// `Schedule::systems_in_set`). `data_type_id` is `TypeId::of::<T>()`, which
+/// resolves the flow's underlying resource / component id in a world.
+///
+/// Present only with the `registry` feature enabled.
+#[cfg(feature = "registry")]
+#[derive(Debug, Clone)]
+pub struct DataFlowRegistration {
+    /// `core::any::type_name::<T>()` of the flowing data type — for diagnostics
+    /// and, for message flows, resolving the `Messages<T>` storage by name.
+    pub data_type_name: &'static str,
+    /// `TypeId::of::<T>()` of the flowing data type.
+    pub data_type_id: TypeId,
+    /// The `Writes<T>` set that producers of the flow join.
+    pub writes: InternedSystemSet,
+    /// The `Reads<T>` set that consumers of the flow join.
+    pub reads: InternedSystemSet,
+    /// The schedule the flow was registered in.
+    pub schedule: InternedScheduleLabel,
 }
 
 #[cfg(test)]
@@ -281,5 +368,56 @@ mod tests {
         app.add_systems(Update, (shared_writer, shared_reader));
 
         app.update();
+    }
+
+    // Marker-only resources: distinct flow types whose values are never read.
+    #[cfg(feature = "registry")]
+    #[derive(Resource, Default)]
+    struct Alpha;
+    #[cfg(feature = "registry")]
+    #[derive(Resource, Default)]
+    struct Beta;
+
+    /// The registry resource does not exist until the first `register_data_flow`
+    /// call creates it.
+    #[cfg(feature = "registry")]
+    #[test]
+    fn registry_absent_until_first_registration() {
+        let mut app = App::new();
+        assert!(app.world().get_resource::<DataFlowRegistry>().is_none());
+
+        register_data_flow::<Alpha>(&mut app, Update);
+
+        assert!(app.world().get_resource::<DataFlowRegistry>().is_some());
+    }
+
+    /// Each `register_data_flow::<T>` records one entry naming `T`, the exact
+    /// `Writes<T>` / `Reads<T>` set identities, and the schedule.
+    #[cfg(feature = "registry")]
+    #[test]
+    fn registrations_are_recorded_with_set_and_schedule_identity() {
+        let mut app = App::new();
+        register_data_flow::<Alpha>(&mut app, Update);
+        register_data_flow::<Beta>(&mut app, PostUpdate);
+
+        let registry = app.world().resource::<DataFlowRegistry>();
+        let entries: Vec<&DataFlowRegistration> = registry.iter().collect();
+        assert_eq!(entries.len(), 2, "one entry per register_data_flow call");
+
+        let alpha = entries[0];
+        assert_eq!(alpha.data_type_id, TypeId::of::<Alpha>());
+        assert_eq!(alpha.data_type_name, type_name::<Alpha>());
+        assert_eq!(alpha.writes, Writes::<Alpha>::set().intern());
+        assert_eq!(alpha.reads, Reads::<Alpha>::set().intern());
+        assert_eq!(alpha.schedule, Update.intern());
+
+        let beta = entries[1];
+        assert_eq!(beta.data_type_id, TypeId::of::<Beta>());
+        assert_eq!(beta.writes, Writes::<Beta>::set().intern());
+        assert_eq!(beta.schedule, PostUpdate.intern());
+
+        // Distinct flows carry distinct set identities.
+        assert_ne!(alpha.writes, beta.writes);
+        assert_ne!(alpha.writes, alpha.reads);
     }
 }

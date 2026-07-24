@@ -82,11 +82,30 @@ producer's output **within the same frame**. If a one-frame delay is acceptable,
 prefer leaving the systems unordered (and, if they conflict, declaring the pair
 `ambiguous_with` each other) over forcing an order.
 
+## Feature: `registry` (off by default)
+
+Enable the **`registry`** feature to have every `register_data_flow` call
+recorded in a `DataFlowRegistry` resource — one `DataFlowRegistration` per call,
+naming the flowing type, its `Writes<T>` / `Reads<T>` set identities, and the
+schedule. This lets schedule-introspection tooling enumerate the declared flows
+and check that every system touching a flow's data actually joined the right set
+— for example, an audit that catches a producer which writes `T` but never
+joined `Writes<T>`.
+
+```toml
+bevy_ordering_sets = { version = "0.3", features = ["registry"] }
+```
+
+The feature is **off by default** so it stays out of builds that don't run such
+tooling. It only adds the per-registration bookkeeping — the `Writes<T>` →
+`Reads<T>` ordering `register_data_flow` produces is identical with or without
+it.
+
 ## Bevy compatibility
 
 | `bevy_ordering_sets` | Bevy |
 |----------------------|------|
-| 0.2                  | 0.19 |
+| 0.2, 0.3             | 0.19 |
 | 0.1                  | 0.18 |
 
 ## AI assistance
