@@ -78,7 +78,7 @@
 //! set. The feature is **off by default**: without it, `register_data_flow` only
 //! wires the ordering edge (the crate's original behaviour) and adds no
 //! per-registration bookkeeping. Enable it in the consumer that needs the audit
-//! (`bevy_ordering_sets = { version = "0.3", features = ["registry"] }`).
+//! (`bevy_ordering_sets = { version = "0.4", features = ["registry"] }`).
 //!
 //! # Bevy compatibility
 //!
@@ -86,6 +86,7 @@
 //! |----------------------|------|
 //! | 0.1                  | 0.18 |
 //! | 0.2, 0.3             | 0.19 |
+//! | 0.4                  | 0.20 |
 
 use std::{
     fmt,

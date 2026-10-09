@@ -93,7 +93,7 @@ and check that every system touching a flow's data actually joined the right set
 joined `Writes<T>`.
 
 ```toml
-bevy_ordering_sets = { version = "0.3", features = ["registry"] }
+bevy_ordering_sets = { version = "0.4", features = ["registry"] }
 ```
 
 The feature is **off by default** so it stays out of builds that don't run such
@@ -105,6 +105,7 @@ it.
 
 | `bevy_ordering_sets` | Bevy |
 |----------------------|------|
+| 0.4                  | 0.20 |
 | 0.2, 0.3             | 0.19 |
 | 0.1                  | 0.18 |
 

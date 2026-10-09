@@ -1,8 +1,8 @@
 [package]
 name = "bevy_ordering_sets"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.97.1"
 license = "MIT OR Apache-2.0"
 description = "Declarative data-flow system ordering for Bevy — order systems by the data they read and write, not by hand-written .before()/.after() chains"
 readme = "README.md"
@@ -11,7 +11,7 @@ keywords = ["bevy", "gamedev", "ecs", "scheduling"]
 categories = ["game-development"]
 
 [dependencies]
-bevy = { version = "0.19", default-features = false }
+bevy = { version = "0.20", default-features = false }
 
 [features]
 default = []
